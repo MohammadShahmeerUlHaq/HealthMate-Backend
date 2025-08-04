@@ -1,0 +1,17 @@
+pytz
+pyjwt
+fastapi
+uvicorn
+pydantic
+sqlalchemy
+firebase_admin
+passlib[bcrypt]
+pydantic[email]
+psycopg2-binary
+pydantic-settings
+python-multipart
+google-generativeai
+apscheduler
+tenacity
+matplotlib
+python-dotenv
