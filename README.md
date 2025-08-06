@@ -1,7 +1,3 @@
-## Cyber Looper Backend
-
-### Instructions
-
 1. Create a virtual environment: `python -m venv .venv`
 2. Activate the environment: `.\.venv\Scripts\activate`
 3. Install requirements.txt: `pip install -r .\requirements.txt`
