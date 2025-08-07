@@ -21,6 +21,11 @@ import re
 from schemas.messages import MessageCreate, MessagePair
 from constants.systemPrompt import system_prompt
 
+from langchain.chains.summarize import load_summarize_chain
+from langchain_google_genai import ChatGoogleGenerativeAI as GoogleGenerativeAI
+from langchain.prompts import SystemMessagePromptTemplate
+from langchain.schema import Document
+
 load_dotenv()
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -130,37 +135,39 @@ def create_message_with_ai(db: Session, user_id: int, message: MessageCreate, me
     try:
         system_message = system_prompt
 
-        medicines = get_user_medicines(db, user_id)
-        bp_logs = get_recent_bp_logs(db, user_id, limit=4)
-        sugar_logs = get_recent_sugar_logs(db, user_id, limit=4)
+        # medicines = get_user_medicines(db, user_id)
+        # bp_logs = get_recent_bp_logs(db, user_id, limit=4)
+        # sugar_logs = get_recent_sugar_logs(db, user_id, limit=4)
 
-        # Format context parts
-        context_parts = []
+        # # Format context parts
+        # context_parts = []
 
-        if medicines:
-            med_names = ', '.join([f"{med.name} ({med.strength})" for med in medicines])
-            print(f"Current medications: {med_names}.")
-            context_parts.append(f"Current medications: {med_names}.")
+        # if medicines:
+        #     med_names = ', '.join([f"{med.name} ({med.strength})" for med in medicines])
+        #     print(f"Current medications: {med_names}.")
+        #     context_parts.append(f"Current medications: {med_names}.")
 
-        if bp_logs:
-            formatted_bp = ', '.join([
-                f"{bp.checked_at.strftime('%b %d')}: {bp.systolic}/{bp.diastolic} mmHg"
-                for bp in bp_logs
-            ])
-            print(f"Last 4 blood pressure readings: {formatted_bp}.")
-            context_parts.append(f"Last 4 blood pressure readings: {formatted_bp}.")
+        # if bp_logs:
+        #     formatted_bp = ', '.join([
+        #         f"{bp.checked_at.strftime('%b %d')}: {bp.systolic}/{bp.diastolic} mmHg"
+        #         for bp in bp_logs
+        #     ])
+        #     print(f"Last 4 blood pressure readings: {formatted_bp}.")
+        #     context_parts.append(f"Last 4 blood pressure readings: {formatted_bp}.")
 
-        if sugar_logs:
-            formatted_sugar = ', '.join([
-                f"{sugar.checked_at.strftime('%b %d')}: {sugar.value} mg/dL"
-                for sugar in sugar_logs
-            ])
-            print(f"Last 4 sugar level readings: {formatted_sugar}.")
-            context_parts.append(f"Last 4 sugar level readings: {formatted_sugar}.")
+        # if sugar_logs:
+        #     formatted_sugar = ', '.join([
+        #         f"{sugar.checked_at.strftime('%b %d')}: {sugar.value} mg/dL"
+        #         for sugar in sugar_logs
+        #     ])
+        #     print(f"Last 4 sugar level readings: {formatted_sugar}.")
+        #     context_parts.append(f"Last 4 sugar level readings: {formatted_sugar}.")
 
-        if context_parts:
-            print(context_parts)
-            system_message += '\n\n**Patient Summary**:\n' + '\n'.join(context_parts)
+        # if context_parts:
+        #     print(context_parts)
+        #     system_message += '\n\n**Patient Summary**:\n' + '\n'.join(context_parts)
+
+        system_message += f"\n\n**User ID**: {user_id}\n"
 
         if message_context:
             system_message += (
@@ -184,31 +191,50 @@ def create_message_with_ai(db: Session, user_id: int, message: MessageCreate, me
         db.refresh(user_message)
 
         return user_message
-    except LLMResponseError as e:
-        return {"error": f"LLM call failed: {e}"}, 0
     except Exception as e:
         db.rollback()
         print(f"DB Error: {e}")
-        return {"error": "Internal server error"}, 0
+        return {"error": "Internal server error"}
 
 
-def summarize_conversation_incremental(messages: list, previous_summary: str) -> Tuple[str, int]:
+# def summarize_conversation_incremental(messages: list, previous_summary: str) -> Tuple[str, int]:
+def summarize_conversation_incremental(messages: list, previous_summary: str) -> str:
     """Perform an incremental summary using Gemini."""
     if not messages:
         return previous_summary
 
-    last_message = messages[-1]
-    new_content = (
-        f"Previous Summary:\n{previous_summary}\n\n"
-        f"New Message:\nUser: {last_message.user}\nAI: {last_message.ai}"
+    # last_message = messages[-1]
+    # new_content = (
+    #     f"Previous Summary:\n{previous_summary}\n\n"
+    #     f"New Message:\nUser: {last_message.user}\nAI: {last_message.ai}"
+    # )
+    # try:
+    #     # response = gemini_model.generate_content(new_content + '\n\nPlease summarize the conversation succinctly:')
+    #     # updated_summary = response.text
+    #     summary_prompt = new_content + '\n\nPlease summarize the conversation succinctly:'
+    #     updated_summary = run_langchain_agent(summary_prompt, None, None)  # db/user_id not needed for summary
+    #     return updated_summary
+        # Prepare the text to summarize
+    text_to_summarize = previous_summary + "\n" + "\n".join([
+        f"User: {m.user}\nAI: {m.ai}" for m in messages
+    ])
+    docs = [Document(page_content=text_to_summarize)]
+    # Set up Gemini LLM
+    llm = GoogleGenerativeAI(
+        model="gemini-1.5-flash",
+        google_api_key=os.environ.get("GEMINI_API_KEY"),
+        temperature=0.2,
     )
+    # Use the same system prompt
+    system_prompt_template = SystemMessagePromptTemplate.from_template(system_prompt)
+    # Load summarization chain
+    chain = load_summarize_chain(llm, chain_type="stuff")
     try:
-        response = gemini_model.generate_content(new_content + '\n\nPlease summarize the conversation succinctly:')
-        updated_summary = response.text
-        return updated_summary
+        summary = chain.run(docs)
+        return summary
     except Exception as e:
         print(f"Error summarizing conversation: {e}")
-        return previous_summary, 0
+        return previous_summary
 
 
 def get_message(db: Session, message_id: int) -> Message:

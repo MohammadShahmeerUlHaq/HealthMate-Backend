@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 import tenacity
 import google.generativeai as genai
 from google.api_core.exceptions import GoogleAPIError
+from utilities.langchain_agent import run_langchain_agent
 
 EXPECTED_INSIGHT_JSON_KEYS = [
     "smart_recommendations",
@@ -170,7 +171,7 @@ def generate_insight(db: Session, user_id: int, period: InsightPeriod, start_dat
             for log in med_logs
         )
 
-    # Compose Gemini prompt with schedules and period
+    # Compose prompt
     prompt = build_gemini_prompt(
         period,
         start_date,
@@ -182,47 +183,43 @@ def generate_insight(db: Session, user_id: int, period: InsightPeriod, start_dat
         format_sugar(),
         format_meds()
     )
-
     print(prompt)
-
-    # Call Gemini with retry logic (unchanged)
-    gemini_output = ""
+    # Call LangChain agent instead of Gemini
+    langchain_output = ""
     try:
-        gemini_output = generate_gemini_response(prompt)
-    except (GoogleAPIError, tenacity.RetryError, ValueError) as e:
-        print(f"❌ Failed to get a valid Gemini response after retries for user {user_id} for {period.value} period {start_date} to {end_date}: {e}")
+        langchain_output = run_langchain_agent(prompt, db, user_id)
+    except Exception as e:
+        print(f"❌ Failed to get a valid LangChain response for user {user_id} for {period.value} period {start_date} to {end_date}: {e}")
         import traceback
         traceback.print_exc()
         return None
-
-    # --- Guardrail: Check for empty response (if it somehow slipped through or was initially empty) ---
-    if not gemini_output:
-        print(f"❌ Gemini output was unexpectedly empty for user {user_id} for {period.value} period {start_date} to {end_date} after retries. Cannot generate insight.")
+    if not langchain_output:
+        print(f"❌ LangChain output was unexpectedly empty for user {user_id} for {period.value} period {start_date} to {end_date}.")
         return None
 
-    # Parsing and validation logic (unchanged, but use start_date/end_date/period)
+    # Parsing and validation logic (unchanged, but use langchain_output instead of gemini_output)
     title = f"{period.value.title()} Health Insight"
     summary = "No detailed summary provided by AI."
     json_data = {key: [] for key in EXPECTED_INSIGHT_JSON_KEYS}
 
     try:
         # --- Guardrail: Robust Parsing of Title and Summary using Regex ---
-        title_match = re.search(r"^Title:\s*(.*)$", gemini_output, re.MULTILINE | re.IGNORECASE)
+        title_match = re.search(r"^Title:\s*(.*)$", langchain_output, re.MULTILINE | re.IGNORECASE)
         if title_match:
             title = title_match.group(1).strip()
         else:
-            print(f"⚠️ Gemini output missing 'Title:' line for user {user_id} for {period.value} period {start_date} to {end_date}. Using default.")
+            print(f"⚠️ LangChain output missing 'Title:' line for user {user_id} for {period.value} period {start_date} to {end_date}. Using default.")
 
-        summary_match = re.search(r"^Summary:\s*(.*)$", gemini_output, re.MULTILINE | re.IGNORECASE)
+        summary_match = re.search(r"^Summary:\s*(.*)$", langchain_output, re.MULTILINE | re.IGNORECASE)
         if summary_match:
             summary = summary_match.group(1).strip()
         else:
-            print(f"⚠️ Gemini output missing 'Summary:' line for user {user_id} for {period.value} period {start_date} to {end_date}. Using default.")
+            print(f"⚠️ LangChain output missing 'Summary:' line for user {user_id} for {period.value} period {start_date} to {end_date}. Using default.")
 
         # --- Guardrail: Extract and Validate JSON Block using Regex ---
-        json_block_match = re.search(r"```json\s*(\{.*?\})\s*```", gemini_output, re.DOTALL)
+        json_block_match = re.search(r"```json\s*(\{.*?\})\s*```", langchain_output, re.DOTALL)
         if not json_block_match:
-            raise ValueError("Gemini output did not contain a valid JSON block enclosed in ```json...```.")
+            raise ValueError("LangChain output did not contain a valid JSON block enclosed in ```json...```.")
 
         json_raw = json_block_match.group(1).strip()
         json_data = json.loads(json_raw) # This will raise json.JSONDecodeError for invalid JSON
@@ -272,7 +269,7 @@ def generate_insight(db: Session, user_id: int, period: InsightPeriod, start_dat
         print(f"❌ JSON parsing failed for user {user_id} for {period.value} period {start_date} to {end_date}: {e}")
         return None
     except ValueError as e:
-        print(f"❌ Gemini output format/structure validation failed for user {user_id} for {period.value} period {start_date} to {end_date}: {e}")
+        print(f"❌ LangChain output format/structure validation failed for user {user_id} for {period.value} period {start_date} to {end_date}: {e}")
         return None
     except Exception as e:
         print(f"❌ An unexpected error occurred during insight generation for user {user_id} for {period.value} period {start_date} to {end_date}: {e}")

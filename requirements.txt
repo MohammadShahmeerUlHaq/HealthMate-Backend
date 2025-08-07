@@ -10,9 +10,12 @@ pydantic[email]
 psycopg2-binary
 pydantic-settings
 python-multipart
-google-generativeai
+google-generativeai>=0.3.2
 apscheduler
 tenacity
 matplotlib
 python-dotenv
 fpdf
+langchain-google-genai
+langchain_community
+langchain>=0.1.0
