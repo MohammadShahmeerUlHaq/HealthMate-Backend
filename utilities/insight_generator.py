@@ -9,7 +9,7 @@ from crud.medication_logs import get_logs_by_date as get_med_logs
 from crud.bp_schedules import get_user_bp_schedules
 from crud.sugar_schedules import get_user_sugar_schedules
 from crud.medications import get_user_medications
-from utilities.gemini_client import generate_gemini_response
+# from utilities.gemini_client import generate_gemini_response  # No longer used, using LangChain agent instead
 from sqlalchemy.exc import IntegrityError
 import tenacity
 import google.generativeai as genai
